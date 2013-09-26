@@ -201,14 +201,49 @@ function defineVldRulesLib(window){
     });
 
     /* 手机号码或者座机号码*/
-    VldRulesLib.extend("phonenum",function(value,args){
-        if(VldRulesLib.validate(value, ["phone"]).passed||VldRulesLib.validate(value, ["mobile"]).passed)
-           return true;
+    VldRulesLib.extend("phonenum",function(value,isBlur){
+        //  首先，以正则表达式的方式，过滤掉含有除了数字，+-符号的结果，
+        //并确保+只能出现在第一位
+        if(/^\+?[0-9\-]*$/.test(value)==true){
+        	//如果符合，就要确保不存在连续的-,手机尾数需要在外部配置min,max规则进行校验
+        	var linePos=value.indexOf('--');
+        	if(linePos!=-1){
+        	   return false;
+        	}
+	        if(value.indexOf('-')==0||(isBlur&&value.lastIndexOf('-')==value.length-1)){
+        	   return false;
+        	}
+	        return true;
+        }
         return false;
+    },function(value,isBlur){
+    	//过滤掉除数字，+-符号外的信息
+    	var returnValue=value.replace(/[^0-9\-\+]/ig, "");
+    	var plusPos;
+        //判断是否有+，并判断其位置是否正确，如果错误，进行过滤
+        if(returnValue.length>1){
+	        var addPos=returnValue.substring(1).indexOf('+');
+	        if(addPos!=-1){
+	           returnValue=returnValue.substring(0,1)+returnValue.substring(1).replace('+','');
+	        }
+	        //判断是否有连续的-符号，如果有，立刻替换掉
+	        plusPos=returnValue.indexOf('--');
+	        if(plusPos!=-1){
+	           returnValue=returnValue.replace('--','-');
+	        }
+        }
+        //避免-出现在两头(因为动态验证时，有可能会出现010-这种情况，所以，对尾部-的验证必须从第10位开始)
+        if(returnValue.indexOf('-')==0||(isBlur&&returnValue.lastIndexOf('-')==returnValue.length-1)){
+           returnValue=returnValue.replace('-','');
+        }
+        return returnValue;
     });
+
     
     /* 钱数验证*/
-    VldRulesLib.extend("money",/^(([1-9]+)|([0-9]+\.[0-9]{0,2}))$/); 
+    VldRulesLib.extend("money",/^(([1-9]+)|([0-9]+\.[0-9]{0,2}))$/,function(value,args){
+    	return VldRulesLib.rules['number'].revise(value,2);
+    });  
 
     /* url,参数为协议名,如http,多个协议用|连接.为空表示不限 */
     VldRulesLib.extend("url", function(value, args) {
@@ -544,11 +579,12 @@ function defineVldRulesLib(window){
         return result.join("");
     });
 
-    /* 验证
+   /* 验证
      * @param value {string} 待验证数据
      * @param rule  {array}  规则数组,每个元素是规则字符串
-     */
-    VldRulesLib.validate = function(value, rule) {
+     * @param options {object} 约定的一些规则需要的参数
+     */   
+    VldRulesLib.validate = function(value, rule,options) {
         var rules = VldRulesLib._parseRule(rule);
         var details = []; //记录每个规则的返回结果
         var cpyValue = value; //记录每次revised后的value
@@ -565,8 +601,15 @@ function defineVldRulesLib(window){
         } else { //非空值
             for(var i = 0; i < rules.length; i++){
                 if (VldRulesLib.rules[rules[i].rule] && VldRulesLib.rules[rules[i].rule].check) {
-                    var checkResult = typeof VldRulesLib.rules[rules[i].rule].check == "function" ? VldRulesLib.rules[rules[i].rule].check(value, rules[i].args) : VldRulesLib.rules[rules[i].rule].check.test(value);
-                    var revisedVal = VldRulesLib.rules[rules[i].rule].revise != undefined ? VldRulesLib.rules[rules[i].rule].revise(cpyValue, rules[i].args) : cpyValue;
+                	var checkResult,revisedVal;
+	            	//针对phonenum最后一位的验证，需要获知用户是否输入完成
+	            	if(rules[i].rule=='phonenum'){
+	                    checkResult =  VldRulesLib.rules['phonenum'].check(value, options.isBlur);
+	                    revisedVal = VldRulesLib.rules['phonenum'].revise(cpyValue, options.isBlur);
+	            	}else{
+	                    checkResult = typeof VldRulesLib.rules[rules[i].rule].check == "function" ? VldRulesLib.rules[rules[i].rule].check(value, rules[i].args) : VldRulesLib.rules[rules[i].rule].check.test(value);
+	                    revisedVal = VldRulesLib.rules[rules[i].rule].revise != undefined ? VldRulesLib.rules[rules[i].rule].revise(cpyValue, rules[i].args) : cpyValue;
+	            	}
                     cpyValue = revisedVal; //修正后的值传递给下一个规则继续修正
                     details.push(checkResult);
                 } else {
